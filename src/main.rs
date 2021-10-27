@@ -1,23 +1,67 @@
+#![warn(clippy::all, clippy::pedantic)]
+
 use rand::random; // 0.8.4
+use scottish_names::{Sex, first_name, surname}; // 0.2.2
+use titlecase::titlecase; // 1.0
+
+use std::sync::mpsc;
+use std::thread;
 
 fn main() {
     //let mut graves = Vec::new();
-    gamble_sim(100000, 96);
+    // gamble_sim(10_000_000, 190, 500, false);
+
+    let args: Vec<String> = std::env::args().collect();
+    let args: (usize, usize, usize, bool) = (
+        // to generate
+        args.get(1).map_or(10000, |gens| gens.parse().expect("could not parse amount to generate!")),
+        // bar length (-2 :S)
+        args.get(2).map_or(190, |bar_len| bar_len.parse().expect("could not parse amount to generate!")),
+        // threads to spawn
+        args.get(3).map_or(10, |threads| threads.parse().expect("could not parse amount to generate!")),
+        // whether to show cool progress bar and updating generation count
+        args.get(4).map_or(true, |logging| logging != "false")
+    );
+
+    gamble_sim(args.0, args.1, args.2, args.3);
 }
 
-pub fn gamble_sim(to_gen: usize, bar_len: usize) {
+/// # Panics
+/// stop
+pub fn gamble_sim(to_gen: usize, bar_len: usize, threads: usize, show_progress: bool) {
+    let (tx, rx) = mpsc::channel();
+
+    for _ in 0..threads {
+        let thread_tx = tx.clone();
+
+        thread::spawn(move || {
+            for _ in 1..=(to_gen / threads) {
+                let mut gamer = Gambler::new(1000, 1);
+                gamer.gamble();
+                // graves.push(gamer);
+                thread_tx.send(gamer).unwrap();
+            }
+            drop(thread_tx);
+        });
+    }
+    drop(tx);
+
+    // thread::spawn(move || {
+    //     let val = String::from("hi");
+    //     tx2.send(val).unwrap();
+    // });
+
     let mut winner = Gambler::new(0, 0);
 
-    for i in 1..=to_gen {
-        let mut gamer = Gambler::new(1000, 1);
-        gamer.gamble();
-        // graves.push(gamer);
+    let mut generation = 0;
+    while let Ok(gamer) = rx.recv() {
+        generation += 1;
         if gamer.peak_money > winner.peak_money {
             winner = gamer;
             print!("\x1b[1B\nCurrent leader:\n{}\nGeneration:\n", winner);
-            update(i, to_gen, bar_len, true)
-        } else {
-            update(i, to_gen, bar_len, false)
+            update(generation, to_gen, bar_len, true);
+        } else if show_progress && generation % threads == 0 {
+            update(generation, to_gen, bar_len, false);
         }
     }
 
@@ -26,24 +70,31 @@ pub fn gamble_sim(to_gen: usize, bar_len: usize) {
 
 #[derive(Debug)]
 struct Gambler {
+    name: String,
     money: usize,
     start_bet: usize,
     bet: usize,
     flips: usize,
     peak_money: usize,
-    successses: usize,
+    successes: usize,
     failures: usize,
 }
 
 impl Gambler {
     fn new(money: usize, start_bet: usize) -> Self {
         Self {
+            name: format!("{} {}", first_name(if random() {
+                Sex::Male
+            } else {
+                Sex::Female
+            }), titlecase(surname())),
+            // name: String::from(""),
             money,
             start_bet,
             bet: start_bet,
             flips: 0,
             peak_money: money,
-            successses: 0,
+            successes: 0,
             failures: 0,
         }
     }
@@ -54,17 +105,17 @@ impl Gambler {
             return false;
         }
 
-        let successs: bool = random();
+        let success: bool = random();
 
-        if successs {
+        if success {
             self.money += self.bet;
-            self.successses += 1;
+            self.successes += 1;
         } else {
             self.money -= self.bet;
             self.failures += 1;
         }
 
-        successs
+        success
     }
 
     fn gamble(&mut self) {
@@ -84,18 +135,20 @@ impl std::fmt::Display for Gambler {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "Money: {}
+            "Name: {}
+Money: {}
 Start bet: {}
 Killer bet: {}
 Flips survived: {}
 Successful flips: {}
 Unsuccessful flips: {}
 Peak money: {}",
+            self.name,
             self.money,
             self.start_bet,
             self.bet,
             self.flips,
-            self.successses,
+            self.successes,
             self.failures,
             self.peak_money
         )
@@ -115,7 +168,7 @@ fn gen_bar(value: usize, old_top: usize, bar_len: usize) -> String {
 
 fn update_bar(value: usize, old_top: usize, bar_len: usize, refresh: bool) -> bool {
     let new_bar = gen_bar(value, old_top, bar_len);
-    if new_bar != gen_bar(value - 1, old_top, bar_len) || refresh {
+    if refresh || new_bar != gen_bar(value - 1, old_top, bar_len) {
         if !refresh {
             print!("\x1b[1B");
         }

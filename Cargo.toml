@@ -7,3 +7,5 @@ edition = "2018"
 
 [dependencies]
 rand = "^0.8.4"
+scottish_names = "^0.2.2"
+titlecase = "1.0"
